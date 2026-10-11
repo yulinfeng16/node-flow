@@ -1,0 +1,32 @@
+﻿{
+  "name": "node-flow",
+  "version": "1.0.0",
+  "description": "Portable Blender-style node-graph editor: the UI and the connection data, with every node type defined by the host application.",
+  "keywords": [
+    "node-editor",
+    "node-graph",
+    "no-code",
+    "visual-programming",
+    "blender",
+    "flow",
+    "editor"
+  ],
+  "license": "MIT",
+  "main": "core.js",
+  "files": [
+    "core.js",
+    "ui.js",
+    "README.md",
+    "examples"
+  ],
+  "scripts": {
+    "test": "node test/run.js"
+  },
+  "devDependencies": {
+    "jsdom": "^30.1.2"
+  },
+  "engines": {
+    "node": ">=14"
+  },
+  "sideEffects": false
+}

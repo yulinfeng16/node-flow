@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>node-flow &middot; Blender-style node editor demo</title>
+<style>
+  :root{--bg:#1b1b1b;--panel:#242424;--panel2:#2c2c2c;--line:#111;--fg:#e6e6e6;--dim:#9a9a9a;--accent:#ffb454;}
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;}
+  body{background:var(--bg);color:var(--fg);font:13px/1.45 "Segoe UI",Inter,Roboto,system-ui,sans-serif;overflow:hidden;}
+  #app{display:flex;flex-direction:column;height:100vh;}
+  header{display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--panel);border-bottom:1px solid var(--line);flex:0 0 auto;flex-wrap:wrap;}
+  header .brand{font-weight:600;letter-spacing:.02em;margin-right:6px;}
+  header .brand small{color:var(--dim);font-weight:400;margin-left:6px;}
+  .tb{display:flex;align-items:center;gap:4px;padding:0 6px;border-left:1px solid #333;height:26px;}
+  .tb:first-of-type{border-left:0;}
+  .tb button{background:#333;color:#eee;border:1px solid var(--line);border-radius:4px;padding:3px 9px;font:12px inherit;cursor:pointer;}
+  .tb button:hover{background:#3f3f3f;}
+  .tb button.primary{background:#3c6e52;border-color:#2a5039;}
+  .tb button.primary:hover{background:#46805f;}
+  .tb button:disabled{opacity:.45;cursor:default;}
+  .tb select{background:#2a2a2a;color:#eee;border:1px solid var(--line);border-radius:4px;padding:3px 6px;font:12px inherit;}
+  main{flex:1 1 auto;display:flex;min-height:0;}
+  #editor{position:relative;flex:1 1 auto;min-width:0;}
+  aside{flex:0 0 302px;background:var(--panel);border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0;}
+  aside.hidden{display:none;}
+  aside .pane{border-bottom:1px solid var(--line);display:flex;flex-direction:column;min-height:0;}
+  aside .pane h3{margin:0;padding:7px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);background:var(--panel2);}
+  aside .pane .body{overflow:auto;padding:8px 10px;font:12px/1.5 "Cascadia Mono",Consolas,monospace;}
+  #previews{flex:1 1 auto;}
+  #log{flex:0 0 168px;}
+  #log .line{padding:1px 0;border-bottom:1px dotted #2f2f2f;white-space:pre-wrap;word-break:break-word;}
+  #log .line.error{color:#ff8b7a;}
+  #log .line.muted{color:#888;}
+  #log .line.info{color:#bcd7c4;}
+  .pv{border-bottom:1px solid #2c2c2c;padding:5px 0;}
+  .pv .t{color:var(--accent);}
+  .pv .v{color:#cfe8c8;white-space:pre-wrap;word-break:break-word;}
+  .pv .err{color:#ff8b7a;}
+  .hint{color:var(--dim);font-size:11.5px;line-height:1.5;}
+  kbd{background:#333;border:1px solid #111;border-bottom-width:2px;border-radius:3px;padding:0 4px;font:11px monospace;}
+  footer{flex:0 0 auto;display:flex;align-items:center;gap:14px;padding:4px 10px;background:var(--panel);border-top:1px solid var(--line);color:var(--dim);font-size:11.5px;}
+  .toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#333;border:1px solid #111;
+    border-radius:6px;padding:7px 14px;font-size:12.5px;box-shadow:0 8px 24px rgba(0,0,0,.5);opacity:0;transition:opacity .18s;pointer-events:none;z-index:99;}
+  .toast.show{opacity:1;}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <span class="brand">node-flow <small>portable node editor &middot; nodes defined by the host</small></span>
+    <span class="tb">
+      <button id="btnAdd" class="primary">+ Add node</button>
+      <button id="btnFrame">Frame all</button>
+    </span>
+    <span class="tb">
+      <button id="btnUndo" title="Ctrl+Z">Undo</button>
+      <button id="btnRedo" title="Ctrl+Shift+Z">Redo</button>
+      <button id="btnDelete" title="Delete">Delete</button>
+    </span>
+    <span class="tb">
+      <select id="examples" title="Load a sample graph">
+        <option value="">Load example&hellip;</option>
+        <option value="calc">Tip calculator</option>
+        <option value="fizz">FizzBuzz list</option>
+        <option value="stats">Text statistics</option>
+        <option value="empty">Empty graph</option>
+      </select>
+    </span>
+    <span class="tb">
+      <button id="btnSave">Save</button>
+      <button id="btnLoad">Load</button>
+      <button id="btnCopy">Copy JSON</button>
+      <button id="btnDownload">Download</button>
+      <button id="btnClear">Clear</button>
+    </span>
+    <span class="tb">
+      <label style="color:var(--dim)"><input type="checkbox" id="chkAuto" checked> live evaluate</label>
+      <label style="color:var(--dim)"><input type="checkbox" id="chkSnap" checked> snap</label>
+      <button id="btnPanel">Panel</button>
+    </span>
+  </header>
+
+  <main>
+    <div id="editor"></div>
+    <aside id="side">
+      <div class="pane" id="previews">
+        <h3>Results <span id="stat" style="float:right;text-transform:none;letter-spacing:0"></span></h3>
+        <div class="body" id="previewBody"><div class="hint">Connect something to a <b>Preview</b> node and its value shows up here.</div></div>
+      </div>
+      <div class="pane" id="log">
+        <h3>Log</h3>
+        <div class="body" id="logBody"></div>
+      </div>
+      <div class="pane">
+        <h3>Controls</h3>
+        <div class="body hint">
+          <b>Right-click / double-click</b> canvas: add node<br>
+          <b>Drag socket &rarr; socket</b>: connect<br>
+          <b>Drag from a linked input</b>: detach the wire<br>
+          <b>Alt+click a wire</b> / double-click: cut<br>
+          <b>Drag on empty canvas</b>: box select<br>
+          <b>Middle drag anywhere</b> or <kbd>Space</kbd>+drag: pan<br>
+          <b>Right-drag on empty canvas</b>: pan &middot; right-<i>click</i>: menu<br>
+          <b>Alt+drag empty canvas</b>: pan too<br>
+          <b>Wheel</b>: zoom &middot; <kbd>H</kbd>: frame all<br>
+          <b>Touch</b>: one finger drags &middot; two fingers pinch to zoom<br>
+          &nbsp;&nbsp;and drag to pan &middot; <b>press and hold</b> for the menu<br>
+          <b>M</b> mute &middot; <b>F</b> collapse &middot; <kbd>Del</kbd> delete<br>
+          <b>Ctrl+D</b> duplicate &middot; <b>Alt+drag</b> copy<br>
+          <b>Ctrl+C/V/X</b> clipboard &middot; <b>Ctrl+Z/Y</b> undo<br>
+          Resize a node from its bottom-right corner.
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <footer>
+    <span id="status">ready</span>
+    <span id="stats"></span>
+    <span style="margin-left:auto">Everything below <code>examples/</code> is sample code; the library is only <code>core.js</code> + <code>ui.js</code>.</span>
+  </footer>
+</div>
+<div class="toast" id="toast"></div>
+<input type="file" id="fileInput" accept=".json,application/json" style="display:none">
+
+<!-- library: two files, no build step, no dependencies -->
+<script src="../core.js"></script>
+<script src="../ui.js"></script>
+<!-- example content -->
+<script src="nodes-example.js"></script>
+<script src="host.js"></script>
+
+<script>
+(function () {
+  'use strict';
+  var NG = window.NG;
+  var Registry = NG.NodeRegistry;
+  var Editor = window.NGEditor;
+
+  /* ------------------------------------------------------------ registry */
+
+  var registry = new Registry();
+  registry.register(window.ExampleNodes.exampleNodes);
+
+  var graph = new NG.Graph({ registry: registry, meta: { name: 'Demo graph' } });
+  var editor = new Editor(document.getElementById('editor'), {
+    registry: registry,
+    graph: graph,
+    globalKeys: true,
+    titleFormatter: function (node) {
+      if (node.type === 'math/binary' && node.def && node.def.body) {
+        var op = node.body.op;
+        var label = { add: 'Add', sub: 'Subtract', mul: 'Multiply', div: 'Divide', mod: 'Modulo', pow: 'Power', min: 'Minimum', max: 'Maximum', atan2: 'Angle' };
+        if (label[op]) return label[op];
+      }
+      if (node.type === 'math/unary') return 'Math: ' + node.body.op;
+      if (node.type === 'text/ops') return 'Text: ' + node.body.op;
+      if (node.type === 'list/transform') return 'List: ' + node.body.op;
+      return node.title;
+    }
+  });
+
+  /* ------------------------------------------------------------- helpers */
+
+  function $(id) { return document.getElementById(id); }
+  var toastTimer = null;
+  function toast(message) {
+    var t = $('toast');
+    t.textContent = message;
+    t.classList.add('show');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.classList.remove('show'); }, 1800);
+  }
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    });
+  }
+  var logLines = [];
+  function log(message, level) {
+    logLines.push({ message: message, level: level || 'info' });
+    if (logLines.length > 300) logLines.shift();
+    renderLog();
+  }
+  function renderLog() {
+    var out = [];
+    for (var i = logLines.length - 1; i >= 0; i--) {
+      out.push('<div class="line ' + logLines[i].level + '">' + escapeHtml(logLines[i].message) + '</div>');
+    }
+    $('logBody').innerHTML = out.join('');
+  }
+
+  /* ---------------------------------------------------- live evaluation */
+
+  var evaluateTimer = null;
+  function scheduleEvaluate(delay) {
+    if (!$('chkAuto').checked) return;
+    if (evaluateTimer) clearTimeout(evaluateTimer);
+    evaluateTimer = setTimeout(evaluate, delay === undefined ? 90 : delay);
+  }
+
+  function evaluate() {
+    var result = window.NodeFlowHost.evaluate(graph, { log: null });
+    // previews on the Preview nodes themselves
+    graph.nodes.forEach(function (node) {
+      if (!node.def || !node.def.preview) return;
+      var lines = [];
+      var err = result.errors.get(node.id);
+      if (err) lines.push('\u2715 ' + err);
+      for (var i = 0; i < node.outputs.length; i++) {
+        var v = result.values.get(node.id + ':' + node.outputs[i].name);
+        if (v !== undefined) lines.push(node.outputs[i].name + ' = ' + window.NodeFlowHost.stringify(v));
+      }
+      editor.setNodeState(node, { error: err || null, preview: lines.join('\n') || '\u2014' });
+    });
+
+    // results panel: every terminal node, newest first
+    var rows = [];
+    graph.nodes.forEach(function (node) {
+      if (!node.def || !node.def.terminal) return;
+      var info = graph.inspect(node.id);
+      var connected = info.inputs.some(function (s) { return s.links.length > 0; });
+      if (!connected) return;
+      var value = node._result;
+      var err = result.errors.get(node.id);
+      rows.push('<div class="pv"><div class="t">' + escapeHtml(node.title) + '</div>' +
+        (err ? '<div class="err">' + escapeHtml(err) + '</div>'
+          : '<div class="v">' + escapeHtml(window.NodeFlowHost.stringify(value)) + '</div>') +
+        '</div>');
+    });
+    $('previewBody').innerHTML = rows.length ? rows.join('')
+      : '<div class="hint">Connect something to a <b>Preview</b> node and its value shows up here.</div>';
+
+    // status + stats
+    if (result.cyclic) {
+      $('status').textContent = 'cycle detected - evaluation stopped';
+    } else {
+      $('status').textContent = result.order.length + ' nodes evaluated, ' + result.errors.size + ' error(s)';
+    }
+    var stats = graph.stats();
+    var cats = Object.keys(stats.categories).sort().map(function (k) { return k + ':' + stats.categories[k]; }).join('  ');
+    $('stats').textContent = graph.nodes.size + ' nodes / ' + graph.edges.size + ' links' + (cats ? '   (' + cats + ')' : '');
+    $('stat').textContent = graph.nodes.size + 'n ' + graph.edges.size + 'l';
+  }
+
+  graph.on('change', function () { scheduleEvaluate(); });
+  graph.on('node:ports', function () { scheduleEvaluate(0); });
+
+  /* -------------------------------------------------------- toolbar wiring */
+
+  var mouse = { x: 100, y: 100 };
+  document.addEventListener('pointermove', function (ev) { mouse.x = ev.clientX; mouse.y = ev.clientY; });
+
+  $('btnAdd').addEventListener('click', function () { editor.openSearch(mouse.x, mouse.y); });
+  $('btnFrame').addEventListener('click', function () { editor.frameAll(); });
+  $('btnUndo').addEventListener('click', function () { editor.history.undo(); editor.refresh(); evaluate(); });
+  $('btnRedo').addEventListener('click', function () { editor.history.redo(); editor.refresh(); evaluate(); });
+  $('btnDelete').addEventListener('click', function () { editor.deleteSelection(); evaluate(); });
+  $('btnClear').addEventListener('click', function () {
+    if (!graph.nodes.size || confirm('Remove all ' + graph.nodes.size + ' nodes?')) {
+      editor.history.begin('clear'); graph.clear(); editor.history.commit();
+      editor.clearSelection(); editor.refresh(); evaluate();
+      toast('Graph cleared');
+    }
+  });
+  $('btnPanel').addEventListener('click', function () { $('side').classList.toggle('hidden'); editor.resize(); });
+  $('chkAuto').addEventListener('change', function () { if (this.checked) evaluate(); });
+  $('chkSnap').addEventListener('change', function () { editor.options.snap = this.checked; });
+  $('btnCopy').addEventListener('click', function () {
+    var text = editor.toJSON(true);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { toast('Graph JSON copied'); },
+        function () { toast('Clipboard blocked - use Download'); });
+    } else {
+      toast('Clipboard unavailable - use Download');
+    }
+  });
+  $('btnDownload').addEventListener('click', function () {
+    var blob = new Blob([editor.toJSON(true)], { type: 'application/json' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = (graph.meta.name || 'graph').replace(/[^\w.-]+/g, '-') + '.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
+    toast('Downloaded ' + a.download);
+  });
+  $('btnSave').addEventListener('click', function () {
+    try {
+      localStorage.setItem('node-flow/demo', editor.toJSON());
+      toast('Saved to this browser');
+    } catch (e) { toast('Save failed: ' + e.message); }
+  });
+  $('btnLoad').addEventListener('click', function () { $('fileInput').click(); });
+  $('fileInput').addEventListener('change', function () {
+    var file = this.files && this.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      try {
+        var doc = JSON.parse(String(reader.result));
+        editor.history.begin('load');
+        editor.load(doc);
+        editor.history.commit();
+        evaluate();
+        toast('Loaded ' + file.name);
+      } catch (err) { toast('Could not parse that file'); }
+    };
+    reader.readAsText(file);
+    this.value = '';
+  });
+
+  /* ------------------------------------------------------------ examples */
+
+  var examples = {
+    calc: function () {
+      var g = { nodes: [], edges: [] };
+      function add(type, x, y, body, title) {
+        var def = registry.get(type);
+        var node = NG.makeNode(def, { x: x, y: y, body: body || {}, title: title });
+        g.nodes.push(NG.serializeNode(node));
+        return node;
+      }
+      function link(a, aName, b, bName) {
+        var aSock, bSock, i;
+        for (i = 0; i < a.outputs.length; i++) if (a.outputs[i].name === aName) aSock = a.outputs[i];
+        for (i = 0; i < b.inputs.length; i++) if (b.inputs[i].name === bName) bSock = b.inputs[i];
+        g.edges.push({ id: NG.uid('e'), from: a.id, fromSocket: aSock.id, to: b.id, toSocket: bSock.id, type: aSock.type });
+      }
+      var total = add('value/number', 40, 60, { value: 84.5 });
+      var pct = add('value/slider', 40, 220, { value: 0.18 });
+      var people = add('value/number', 40, 380, { value: 4 });
+      var tip = add('math/binary', 320, 90, { op: 'mul' }, 'Tip = bill * rate');
+      var sum = add('math/binary', 320, 250, { op: 'add' }, 'Total = bill + tip');
+      var per = add('math/binary', 620, 250, { op: 'div' }, 'Per person = total / people');
+      var note = add('value/note', 40, 520, { text: 'Tip calculator\nTip = bill * rate\nTotal = bill + tip\nPer person = total / people' });
+      var fmt = add('text/format', 620, 40, { template: 'bill {A}  tip {B}  total {C}' }, 'Summary');
+      var out = add('output/preview', 900, 40, {}, 'Per person');
+      link(total, 'Value', tip, 'A');
+      link(pct, 'Value', tip, 'B');
+      link(total, 'Value', sum, 'A');
+      link(tip, 'Result', sum, 'B');
+      link(sum, 'Result', per, 'A');
+      link(people, 'Value', per, 'B');
+      link(total, 'Value', fmt, 'A');
+      link(tip, 'Result', fmt, 'B');
+      link(sum, 'Result', fmt, 'C');
+      link(per, 'Result', out, 'Value');
+      return g;
+    },
+
+    fizz: function () {
+      var g = { nodes: [], edges: [] };
+      function add(type, x, y, body, title) {
+        var def = registry.get(type);
+        var node = NG.makeNode(def, { x: x, y: y, body: body || {}, title: title });
+        g.nodes.push(NG.serializeNode(node));
+        return node;
+      }
+      function link(a, aName, b, bName) {
+        var aSock, bSock, i;
+        for (i = 0; i < a.outputs.length; i++) if (a.outputs[i].name === aName) aSock = a.outputs[i];
+        for (i = 0; i < b.inputs.length; i++) if (b.inputs[i].name === bName) bSock = b.inputs[i];
+        g.edges.push({ id: NG.uid('e'), from: a.id, fromSocket: aSock.id, to: b.id, toSocket: bSock.id, type: aSock.type });
+      }
+      var range = add('list/range', 40, 80, { start: 1, stop: 21, step: 1 }, 'Range 1..20');
+      var mod3 = add('math/binary', 340, 80, { op: 'mod' }, 'n mod 3');
+      var expr = add('math/expression', 340, 320, { expr: 'item % 3 == 0' }, 'Fizz test');
+      var note = add('value/note', 40, 460, { text: 'The Range node produces 1..20.\nThis sample feeds it through a few\nmath nodes so you can watch values\nflow while wiring.' });
+      var agg = add('list/aggregate', 640, 80, { op: 'sum' }, 'Sum of range');
+      var out = add('output/preview', 900, 80, {}, 'Sum');
+      var out2 = add('output/preview', 900, 300, {}, 'Range');
+      link(range, 'List', agg, 'List');
+      link(range, 'List', mod3, 'A');
+      link(agg, 'Result', out, 'Value');
+      link(range, 'List', out2, 'Value');
+      return g;
+    },
+
+    stats: function () {
+      var g = { nodes: [], edges: [] };
+      function add(type, x, y, body, title) {
+        var def = registry.get(type);
+        var node = NG.makeNode(def, { x: x, y: y, body: body || {}, title: title });
+        g.nodes.push(NG.serializeNode(node));
+        return node;
+      }
+      function link(a, aName, b, bName) {
+        var aSock, bSock, i;
+        for (i = 0; i < a.outputs.length; i++) if (a.outputs[i].name === aName) aSock = a.outputs[i];
+        for (i = 0; i < b.inputs.length; i++) if (b.inputs[i].name === bName) bSock = b.inputs[i];
+        g.edges.push({ id: NG.uid('e'), from: a.id, fromSocket: aSock.id, to: b.id, toSocket: bSock.id, type: aSock.type });
+      }
+      var text = add('value/note', 40, 80, { text: 'the quick brown fox\njumps over the lazy dog' }, 'Source text');
+      var split = add('list/split', 380, 80, { sep: ' ' }, 'Split on spaces');
+      var count = add('list/aggregate', 660, 80, { op: 'count' }, 'Word count');
+      var upper = add('text/ops', 380, 300, { op: 'upper' }, 'Uppercase');
+      var join = add('text/join', 660, 300, { sep: '-' }, 'Join with dashes');
+      var fmt = add('text/format', 900, 300, { template: '{A} words' }, 'Label');
+      var out = add('output/preview', 1140, 80, {}, 'Words');
+      var out2 = add('output/preview', 1140, 300, {}, 'Slug');
+      link(text, 'Text', split, 'Text');
+      link(split, 'List', count, 'List');
+      link(text, 'Text', upper, 'Text');
+      link(upper, 'Text', join, 'Parts');
+      link(count, 'Result', fmt, 'A');
+      link(count, 'Result', out, 'Value');
+      link(join, 'Text', out2, 'Value');
+      return g;
+    },
+
+    empty: function () { return { nodes: [], edges: [] }; }
+  };
+
+  $('examples').addEventListener('change', function () {
+    var key = this.value;
+    this.value = '';
+    if (!key) return;
+    if (key === 'empty') {
+      editor.history.begin('example'); graph.clear(); editor.history.commit();
+      editor.clearSelection(); editor.refresh(); evaluate();
+      toast('Empty graph');
+      return;
+    }
+    if (graph.nodes.size && !confirm('Replace the current graph with the "' + key + '" example?')) return;
+    editor.history.begin('example');
+    editor.load(examples[key]());
+    editor.history.commit();
+    editor.frameAll();
+    evaluate();
+    toast('Loaded example: ' + key);
+  });
+
+  /* ---------------------------------------------------------------- boot */
+
+  var restored = false;
+  try {
+    var saved = localStorage.getItem('node-flow/demo');
+    if (saved) {
+      var doc = JSON.parse(saved);
+      if (doc && doc.nodes && doc.nodes.length) {
+        editor.load(doc);
+        restored = true;
+      }
+    }
+  } catch (e) { /* ignore a broken save */ }
+
+  if (!restored) {
+    editor.load(examples.calc());
+    editor.frameAll();
+  }
+
+  editor.on('node:added', function () { scheduleEvaluate(0); });
+  graph.on('load', function () { scheduleEvaluate(0); });
+
+  log('node-flow ' + NG.VERSION + ' ready - ' + registry.types.size + ' node types supplied by the demo.', 'info');
+  log('The editor stores only node/connection data; host.js evaluates it. See README.md.', 'info');
+  evaluate();
+  setTimeout(function () { editor.resize(); editor.frameAll(); evaluate(); }, 60);
+  window.addEventListener('resize', function () { editor.resize(); });
+
+  // handy for poking at the demo from the console
+  window.demo = { NG: NG, registry: registry, graph: graph, editor: editor, evaluate: evaluate };
+})();
+</script>
+</body>
+</html>

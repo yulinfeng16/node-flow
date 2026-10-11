@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>node-flow &middot; minimal embedding example</title>
+<style>
+  html,body{height:100%;margin:0;background:#1b1b1b;color:#e6e6e6;font:13px/1.5 "Segoe UI",Inter,system-ui,sans-serif;}
+  #graph{position:absolute;inset:0 320px 0 0;}
+  #out{position:absolute;top:0;right:0;bottom:0;width:320px;background:#242424;border-left:1px solid #111;
+       overflow:auto;padding:10px;font:12px/1.5 "Cascadia Mono",Consolas,monospace;white-space:pre-wrap;}
+  h2{margin:0 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#9a9a9a;}
+</style>
+</head>
+<body>
+<div id="graph"></div>
+<aside id="out"><h2>Connection data (live)</h2><div id="json"></div></aside>
+
+<!-- two library files, no build step, no dependencies -->
+<script src="../core.js"></script>
+<script src="../ui.js"></script>
+<script>
+// ---------------------------------------------------------------------------
+// This is the entire integration: define node types, create the editor, read
+// the connection data. No library code knows what these nodes mean.
+// ---------------------------------------------------------------------------
+
+// 1. the user's node types
+var registry = new NG.NodeRegistry();
+registry.register([
+  {
+    type: 'my/input', title: 'Input', category: 'Mine', color: '#3c6e52', icon: '>', width: 170,
+    outputs: [{ name: 'Out', type: 'number' }],
+    body: [{ key: 'value', type: 'number', label: 'Value', value: 3 }]
+  },
+  {
+    type: 'my/double', title: 'Double', category: 'Mine', color: '#3a5a7a', icon: '\u00D72', width: 150,
+    inputs: [{ name: 'In', type: 'number' }],
+    outputs: [{ name: 'Out', type: 'number' }]
+  },
+  {
+    type: 'my/show', title: 'Show', category: 'Mine', color: '#7c3b52', icon: '\u25C9', width: 170, preview: true,
+    inputs: [{ name: 'In', type: 'any' }]
+  }
+]);
+
+// 2. the editor
+var graph = new NG.Graph({ registry: registry });
+var editor = new NGEditor('#graph', { registry: registry, graph: graph, globalKeys: true });
+
+// 3. a little starter graph
+var a = editor.addNode('my/input', { x: 60, y: 80 });
+var b = editor.addNode('my/double', { x: 330, y: 80 });
+var c = editor.addNode('my/show', { x: 600, y: 80 });
+graph.connect(a, a.outputs[0], b, b.inputs[0]);
+graph.connect(b, b.outputs[0], c, c.inputs[0]);
+editor.frameAll();
+
+// 4. do something useful with the connection data
+function readGraph() {
+  var doc = graph.serialize();     // the saved document
+  var data = graph.toData();       // resolved links + socket names
+
+  // a naive evaluator: walk in topological order and carry values
+  var values = {};
+  var order = graph.topoOrder() || [];
+  order.forEach(function (id) {
+    var node = graph.node(id);
+    var inputs = {};
+    node.inputs.forEach(function (sock) {
+      var edge = graph.inEdges(id, sock.id)[0];
+      if (!edge) { inputs[sock.name] = sock.default; return; }
+      var from = graph.node(edge.from);
+      var fromSock = NG.findSocket(from, 'output', edge.fromSocket);
+      inputs[sock.name] = values[edge.from + ':' + fromSock.name];
+    });
+
+    var out = {};
+    if (node.type === 'my/input') out.Out = Number(node.body.value) || 0;
+    else if (node.type === 'my/double') out.Out = (Number(inputs.In) || 0) * 2;
+    else if (node.type === 'my/show') out.In = inputs.In;
+    Object.keys(out).forEach(function (k) { values[id + ':' + k] = out[k]; });
+
+    // push the result back into the node as a preview
+    if (node.type === 'my/show') {
+      editor.setNodeState(node, { preview: 'In = ' + out.In });
+    }
+  });
+
+  document.getElementById('json').textContent =
+    'links:\n' + data.links.map(function (l) {
+      return '  ' + l.from.name + ' (' + l.from.node.slice(-4) + ') -> ' + l.to.name + ' (' + l.to.node.slice(-4) + ')';
+    }).join('\n') +
+    '\n\nnodes: ' + data.nodes.length + '   links: ' + data.links.length +
+    '\n\nvalues:\n' + Object.keys(values).map(function (k) { return '  ' + k.slice(-14) + ' = ' + values[k]; }).join('\n') +
+    '\n\n--- serialized document (first 400 chars) ---\n' + JSON.stringify(doc).slice(0, 400) + '\u2026';
+}
+
+graph.on('change', readGraph);
+readGraph();
+</script>
+</body>
+</html>
